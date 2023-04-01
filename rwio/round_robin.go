@@ -1,6 +1,7 @@
 package rwio
 
 import (
+	"io"
 	"sync"
 
 	"github.com/google/uuid"
@@ -43,43 +44,134 @@ func (r *Ring[T]) Next() T {
 	return item
 }
 
-// RoundRobinChunkWriter is a writer that writes
+type WriterIterator interface {
+	Next() io.Writer
+}
+
+type WriterPoolDescriptorRecorder struct {
+	WriterPool
+	id string
+}
+
+func NewWriterPoolRecorder(pool WriterPool) *WriterPoolDescriptorRecorder {
+	return &WriterPoolDescriptorRecorder{
+		WriterPool: pool,
+	}
+}
+
+func (r *WriterPoolDescriptorRecorder) Get() io.Writer {
+	reference := uuid.New().String()
+	writer := r.WriterPool.Get(reference)
+	return NewWriterDescriptorRecorder(writer, reference)
+}
+
+type WriterDescriptorRecorder struct {
+	io.Writer
+	descriptor FileDescriptor
+}
+
+func NewWriterDescriptorRecorder(writer io.Writer, descriptor FileDescriptor) *WriterDescriptorRecorder {
+	return &WriterDescriptorRecorder{
+		Writer:     writer,
+		descriptor: descriptor,
+	}
+}
+
+func (r *WriterDescriptorRecorder) Write(p []byte) (n int, err error) {
+	n, err = r.Writer.Write(p)
+	r.descriptor.Size += int64(n)
+	return n, err
+}
+
+func NewRingIterator(writers []io.Writer) WriterIterator {
+	ring := NewRing[io.Writer]()
+	for _, writer := range writers {
+		ring.Add(writer)
+	}
+	return ring
+}
+
+type IteratorConstructor func(writers []io.Writer) WriterIterator
+
+type LimitWriterIteratorWrapper struct {
+	FragmentLength int
+	SubIterator    WriterIterator
+}
+
+func NewLimitWriterIteratorWrapper(subIterator WriterIterator, fragmentLength int) *LimitWriterIteratorWrapper {
+	return &LimitWriterIteratorWrapper{
+		FragmentLength: fragmentLength,
+		SubIterator:    subIterator,
+	}
+}
+
+func (i *LimitWriterIteratorWrapper) Next() io.Writer {
+	next := i.SubIterator.Next()
+	return NewShortWriteWriter(next, i.FragmentLength)
+}
+
+type ShortWriteWriter struct {
+	w     io.Writer
+	limit int
+}
+
+func NewShortWriteWriter(w io.Writer, limit int) *ShortWriteWriter {
+	return &ShortWriteWriter{
+		w:     w,
+		limit: limit,
+	}
+}
+
+func (sw *ShortWriteWriter) Write(p []byte) (n int, err error) {
+	if sw.limit <= 0 {
+		return 0, io.ErrShortWrite
+	}
+	if len(p) > sw.limit {
+		p = p[:sw.limit]
+		err = io.ErrShortWrite
+	}
+	n, err = sw.w.Write(p)
+	sw.limit -= n
+	return n, err
+}
+
+// FragmentWriter is a writer that writes
 // to a pool of writers in a round-robin fashion.
-type RoundRobinChunkWriter struct {
+type FragmentWriter struct {
 	overflow              int
-	chunkSize             int
+	fragmentLength        int
 	chunkWriterDescriptor FileDescriptor
 	pool                  *WriterPool
-	writers               *Ring[string]
+	iterator              *Ring[string]
 	mutex                 sync.Mutex
 }
 
 // NewRoundRobinChunkWriter creates a new RoundRobinChunkWriter.
-func NewRoundRobinChunkWriter(pool *WriterPool, writersNumber, chunkSize int) (*RoundRobinChunkWriter, error) {
+func NewRoundRobinChunkWriter(pool *WriterPool, writersNumber, fragmentLength int) (*FragmentWriter, error) {
 	writers := NewRing[string]()
 	for i := 0; i < writersNumber; i++ {
 		writers.Add(uuid.New().String())
 	}
 
-	return &RoundRobinChunkWriter{
+	return &FragmentWriter{
 		chunkWriterDescriptor: FileDescriptor{
 			Fragments: make(map[int]Fragment),
 		},
-		chunkSize: chunkSize,
-		writers:   writers,
-		pool:      pool,
-		mutex:     sync.Mutex{},
+		fragmentLength: fragmentLength,
+		iterator:       writers,
+		pool:           pool,
+		mutex:          sync.Mutex{},
 	}, nil
 }
 
 // Write writes the given data to the pool of writers in a round-robin fashion.
-func (c *RoundRobinChunkWriter) Write(p []byte) (int, error) {
+func (c *FragmentWriter) Write(p []byte) (int, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	written := 0
 	for i := 0; len(p) > 0; i++ {
-		writerID := c.writers.Next()
-		data := p[:c.chunkSize-c.overflow]
+		writerID := c.iterator.Next()
+		data := p[:c.fragmentLength-c.overflow]
 		n, err := c.pool.Get(writerID).Write(data)
 		if err != nil {
 			return written, err
@@ -87,7 +179,7 @@ func (c *RoundRobinChunkWriter) Write(p []byte) (int, error) {
 		written += n
 		p = p[n:]
 
-		c.overflow = c.chunkSize - n
+		c.overflow = c.fragmentLength - n
 
 		c.chunkWriterDescriptor.Fragments[i] = Fragment{
 			Location: writerID,
@@ -98,6 +190,6 @@ func (c *RoundRobinChunkWriter) Write(p []byte) (int, error) {
 }
 
 // Descriptor returns the FileDescriptor of the file that was written.
-func (c *RoundRobinChunkWriter) Descriptor() FileDescriptor {
+func (c *FragmentWriter) Descriptor() FileDescriptor {
 	return c.chunkWriterDescriptor
 }

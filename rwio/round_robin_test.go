@@ -23,7 +23,7 @@ func TestWriteAndRead(t *testing.T) {
 	writer, err := NewRoundRobinChunkWriter(pool, 2, 3)
 	assert.NoError(t, err)
 
-	t.Log(writer.writers)
+	t.Log(writer.iterator)
 
 	n, err := writer.Write([]byte(text))
 	assert.NoError(t, err)
@@ -38,7 +38,7 @@ func TestWriteAndRead(t *testing.T) {
 	assert.Equal(t, text, string(result))
 	assert.Equal(t, len(text), n)
 
-	for _, writerID := range writer.writers.items {
+	for _, writerID := range writer.iterator.items {
 		t.Logf("%s", writer.pool.items[writerID].(NopCloser).Writer.(*bytes.Buffer).String())
 	}
 
