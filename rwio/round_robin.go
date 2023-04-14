@@ -124,39 +124,23 @@ func (sw *ShortWriteWriter) Write(p []byte) (n int, err error) {
 	return n, errors.Join(err, errShort)
 }
 
-// FragmentWriter is a writer that writes
-// to a pool of writers in a round-robin fashion.
-type FragmentWriter struct {
-	descriptor *FileDescriptor
-	iterator   WriterIterator
-	mutex      sync.Mutex
+// RoundRobinChunkWriter is a writer that writes
+// writes to the underlying writers until the data is exhausted.
+type SequenceWriter struct {
+	iterator WriterIterator
+	mutex    sync.Mutex
 }
 
-// NewRoundRobinChunkWriter creates a new RoundRobinChunkWriter.
-func NewRoundRobinChunkWriter(pool *WriterPool, writersNumber, fragmentLength int) (*FragmentWriter, error) {
-	descriptor := &FileDescriptor{}
-	recorder := NewDescriptorRecorder(descriptor)
-
-	recPool := NewWriterFactory(pool, recorder)
-
-	writers := make([]io.Writer, writersNumber)
-	for i := 0; i < writersNumber; i++ {
-		writers[i] = recPool.Get()
+// NewSequenceWriter creates a new SequenceWriter.
+func NewSequenceWriter(iterator WriterIterator) *SequenceWriter {
+	return &SequenceWriter{
+		iterator: iterator,
+		mutex:    sync.Mutex{},
 	}
-
-	ringIterator := NewRing(writers...)
-
-	iterator := NewLimitWriterIteratorWrapper(ringIterator, fragmentLength)
-
-	return &FragmentWriter{
-		descriptor: descriptor,
-		iterator:   iterator,
-		mutex:      sync.Mutex{},
-	}, nil
 }
 
 // Write writes the given data to the pool of writers in a round-robin fashion.
-func (c *FragmentWriter) Write(p []byte) (int, error) {
+func (c *SequenceWriter) Write(p []byte) (int, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	written := 0
@@ -172,9 +156,4 @@ func (c *FragmentWriter) Write(p []byte) (int, error) {
 		}
 	}
 	return written, nil
-}
-
-// Descriptor returns the FileDescriptor of the file that was written.
-func (c *FragmentWriter) Descriptor() *FileDescriptor {
-	return c.descriptor
 }

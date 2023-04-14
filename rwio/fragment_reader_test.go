@@ -11,15 +11,31 @@ func TestReader(t *testing.T) {
 	text := []byte("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed sed nisl nec nisl luctus lacinia")
 	catalog := NewInMemoryCatalog()
 	descriptor := func() *FileDescriptor {
+
 		pool := NewWriterPool(catalog)
-		writer, err := NewRoundRobinChunkWriter(pool, 2, 3)
-		assert.NoError(t, err)
+		descriptor := &FileDescriptor{}
+		recorder := NewDescriptorRecorder(descriptor)
+
+		recPool := NewWriterFactory(pool, recorder)
+
+		fragmentLength := 2
+		writersNumber := 3
+		writers := make([]io.Writer, 0)
+		for i := 0; i < writersNumber; i++ {
+			writers = append(writers, recPool.Get())
+		}
+
+		ringIterator := NewRing(writers...)
+
+		iterator := NewLimitWriterIteratorWrapper(ringIterator, fragmentLength)
+
+		writer := NewSequenceWriter(iterator)
 
 		n, err := writer.Write([]byte(text))
 		assert.NoError(t, err)
 		assert.Equal(t, len(text), n)
 
-		return writer.Descriptor()
+		return descriptor
 	}
 
 	t.Run("read_with_eof", func(t *testing.T) {

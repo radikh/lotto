@@ -21,8 +21,23 @@ func TestWriteAndRead(t *testing.T) {
 	catalog := NewInMemoryCatalog()
 	pool := NewWriterPool(catalog)
 
-	writer, err := NewRoundRobinChunkWriter(pool, 2, 3)
-	assert.NoError(t, err)
+	descriptor := &FileDescriptor{}
+	recorder := NewDescriptorRecorder(descriptor)
+
+	recPool := NewWriterFactory(pool, recorder)
+
+	fragmentLength := 2
+	writersNumber := 3
+	writers := make([]io.Writer, 0)
+	for i := 0; i < writersNumber; i++ {
+		writers = append(writers, recPool.Get())
+	}
+
+	ringIterator := NewRing(writers...)
+
+	iterator := NewLimitWriterIteratorWrapper(ringIterator, fragmentLength)
+
+	writer := NewSequenceWriter(iterator)
 
 	t.Log(writer.iterator)
 
@@ -38,7 +53,7 @@ func TestWriteAndRead(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, len(text), n)
 
-	reader := NewFragmentReader(catalog, writer.Descriptor())
+	reader := NewFragmentReader(catalog, descriptor)
 
 	result := make([]byte, len(tripletext))
 
@@ -48,5 +63,5 @@ func TestWriteAndRead(t *testing.T) {
 	assert.Equal(t, len(tripletext), n)
 
 	t.Logf("%s", result)
-	t.Logf("%+v", writer.Descriptor())
+	t.Logf("%+v", descriptor)
 }
