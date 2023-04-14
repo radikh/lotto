@@ -15,20 +15,43 @@ type Fragment struct {
 
 // FileDescriptor is a scheme of how a file to assemle the file.
 type FileDescriptor struct {
-	Fragments map[int]Fragment
+	Fragments []Fragment
+}
+
+// DescriptorRecorder is used to record the fragments of a file.
+type DescriptorRecorder struct {
+	mu      sync.RWMutex
+	desc    *FileDescriptor
+	counter int
+}
+
+func NewDescriptorRecorder(descriptor *FileDescriptor) *DescriptorRecorder {
+	return &DescriptorRecorder{
+		desc: descriptor,
+	}
+}
+
+// Record records a fragment.
+func (cfd *DescriptorRecorder) Record(fragment Fragment) {
+	cfd.mu.Lock()
+	defer cfd.mu.Unlock()
+
+	cfd.desc.Fragments = append(cfd.desc.Fragments, fragment)
+
+	return
 }
 
 // FragmentReader is used to read fragments from a file described by a FileDescriptor.
 type FragmentReader struct {
 	readers    *ReaderPool
-	descriptor FileDescriptor
+	descriptor *FileDescriptor
 	position   int
 	offset     int
 	mu         sync.RWMutex
 }
 
 // NewFragmentReader creates a new FragmentReader.
-func NewFragmentReader(catalog Catalog, descriptor FileDescriptor) *FragmentReader {
+func NewFragmentReader(catalog Catalog, descriptor *FileDescriptor) *FragmentReader {
 	return &FragmentReader{
 		readers:    NewReaderPool(catalog),
 		descriptor: descriptor,

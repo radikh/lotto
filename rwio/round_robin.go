@@ -1,103 +1,81 @@
 package rwio
 
 import (
+	"errors"
 	"io"
 	"sync"
 
 	"github.com/google/uuid"
 )
 
-// Ring represents a circular buffer that stores items of type T.
-// The items can be added to the buffer, and accessed in a circular fashion.
-type Ring[T any] struct {
-	items []T
-	index int
-}
-
-// NewRing creates a new Ring with the given initial items.
-// The items are added to the buffer in the order they are passed.
-func NewRing[T any](items ...T) *Ring[T] {
-	return &Ring[T]{items: items}
-}
-
-// Add adds the given item to the Ring.
-func (r *Ring[T]) Add(item T) {
-	r.items = append(r.items, item)
-}
-
-// Get returns the item at the given index in the Ring.
-// If the Ring is empty, Get returns a zero value of type T.
-// If the index is out of range, Get returns an item from the start of the Ring.
-func (r *Ring[T]) Get(index int) T {
-	if len(r.items) == 0 {
-		return *new(T)
-	}
-	return r.items[index%len(r.items)]
-}
-
-// Next returns the next item in the Ring.
-// The item is determined by the current index in the Ring.
-// The index is incremented after the item is returned.
-func (r *Ring[T]) Next() T {
-	item := r.Get(r.index)
-	r.index++
-	return item
-}
-
+// WriterIterator is an interface that allows to iterate over a collection of io.Writer.
 type WriterIterator interface {
 	Next() io.Writer
 }
 
-type WriterPoolDescriptorRecorder struct {
-	WriterPool
-	id string
+// WriterGenarator is a wrapper around WriterPool
+// that spawns writers able to fill the File Descriptor when writing.
+type WriterGenarator struct {
+	*WriterPool
+	recorder *DescriptorRecorder
 }
 
-func NewWriterPoolRecorder(pool WriterPool) *WriterPoolDescriptorRecorder {
-	return &WriterPoolDescriptorRecorder{
+// NewWriterGenerator creates a new WriterPoolDescriptorRecorder.
+func NewWriterGenerator(pool *WriterPool, recorder *DescriptorRecorder) *WriterGenarator {
+	return &WriterGenarator{
 		WriterPool: pool,
+		recorder:   recorder,
 	}
 }
 
-func (r *WriterPoolDescriptorRecorder) Get() io.Writer {
+// Get returns a new writer that is able to fill the File Descriptor when writing.
+func (r *WriterGenarator) Get() io.Writer {
 	reference := uuid.New().String()
 	writer := r.WriterPool.Get(reference)
-	return NewWriterDescriptorRecorder(writer, reference)
+	return r.NewWriterDescriptorRecorder(writer, reference)
 }
 
+// WriterDescriptorRecorder is a wrapper around io.Writer
+// that records the fragments written to the underlying writer.
+// It is used to fill the File Descriptor.
 type WriterDescriptorRecorder struct {
 	io.Writer
-	descriptor FileDescriptor
+	recorder  *DescriptorRecorder
+	reference string
 }
 
-func NewWriterDescriptorRecorder(writer io.Writer, descriptor FileDescriptor) *WriterDescriptorRecorder {
+// NewWriterDescriptorRecorder creates a new WriterDescriptorRecorder.
+func (r *WriterGenarator) NewWriterDescriptorRecorder(writer io.Writer, reference string) *WriterDescriptorRecorder {
 	return &WriterDescriptorRecorder{
-		Writer:     writer,
-		descriptor: descriptor,
+		Writer:    writer,
+		recorder:  r.recorder,
+		reference: reference,
 	}
 }
 
+// Write writes the given data to the underlying writer
+// and records the fragment to the File Descriptor.
 func (r *WriterDescriptorRecorder) Write(p []byte) (n int, err error) {
 	n, err = r.Writer.Write(p)
-	r.descriptor.Size += int64(n)
-	return n, err
-}
-
-func NewRingIterator(writers []io.Writer) WriterIterator {
-	ring := NewRing[io.Writer]()
-	for _, writer := range writers {
-		ring.Add(writer)
+	fragment := Fragment{
+		Length:   n,
+		Location: r.reference,
 	}
-	return ring
+
+	r.recorder.Record(fragment)
+
+	return n, err
 }
 
 type IteratorConstructor func(writers []io.Writer) WriterIterator
 
+// RoundRobinChunkWriter is
 type LimitWriterIteratorWrapper struct {
 	FragmentLength int
 	SubIterator    WriterIterator
 }
 
+// NewRoundRobinChunkWriter creates a new RoundRobinChunkWriter.
 func NewLimitWriterIteratorWrapper(subIterator WriterIterator, fragmentLength int) *LimitWriterIteratorWrapper {
 	return &LimitWriterIteratorWrapper{
 		FragmentLength: fragmentLength,
@@ -105,16 +83,22 @@ func NewLimitWriterIteratorWrapper(subIterator WriterIterator, fragmentLength in
 	}
 }
 
+// Next returns the next writer in the pool
+// limiting the writes to the fragment length.
 func (i *LimitWriterIteratorWrapper) Next() io.Writer {
 	next := i.SubIterator.Next()
 	return NewShortWriteWriter(next, i.FragmentLength)
 }
 
+// ShortWriteWriter is a writer that writes
+// to the underlying writer and returns io.ErrShortWrite
+// if the data is larger than the limit.
 type ShortWriteWriter struct {
 	w     io.Writer
 	limit int
 }
 
+// NewShortWriteWriter creates a new ShortWriteWriter.
 func NewShortWriteWriter(w io.Writer, limit int) *ShortWriteWriter {
 	return &ShortWriteWriter{
 		w:     w,
@@ -122,44 +106,55 @@ func NewShortWriteWriter(w io.Writer, limit int) *ShortWriteWriter {
 	}
 }
 
+// Write writes the given data to the underlying writer.
+// If the data is larger than the limit, it will be
+// truncated and io.ErrShortWrite will be returned.
 func (sw *ShortWriteWriter) Write(p []byte) (n int, err error) {
 	if sw.limit <= 0 {
 		return 0, io.ErrShortWrite
 	}
+
+	var errShort error
 	if len(p) > sw.limit {
 		p = p[:sw.limit]
-		err = io.ErrShortWrite
+		errShort = io.ErrShortWrite
 	}
+
 	n, err = sw.w.Write(p)
 	sw.limit -= n
-	return n, err
+	return n, errors.Join(err, errShort)
 }
 
 // FragmentWriter is a writer that writes
 // to a pool of writers in a round-robin fashion.
 type FragmentWriter struct {
-	overflow              int
-	fragmentLength        int
-	chunkWriterDescriptor FileDescriptor
-	pool                  *WriterPool
-	iterator              *Ring[string]
-	mutex                 sync.Mutex
+	overflow       int
+	fragmentLength int
+	descriptor     *FileDescriptor
+	iterator       WriterIterator
+	mutex          sync.Mutex
 }
 
 // NewRoundRobinChunkWriter creates a new RoundRobinChunkWriter.
 func NewRoundRobinChunkWriter(pool *WriterPool, writersNumber, fragmentLength int) (*FragmentWriter, error) {
-	writers := NewRing[string]()
+	descriptor := &FileDescriptor{}
+	recorder := NewDescriptorRecorder(descriptor)
+
+	recPool := NewWriterGenerator(pool, recorder)
+
+	writers := make([]io.Writer, writersNumber)
 	for i := 0; i < writersNumber; i++ {
-		writers.Add(uuid.New().String())
+		writers[i] = recPool.Get()
 	}
 
+	ringIterator := NewRing(writers...)
+
+	iterator := NewLimitWriterIteratorWrapper(ringIterator, fragmentLength)
+
 	return &FragmentWriter{
-		chunkWriterDescriptor: FileDescriptor{
-			Fragments: make(map[int]Fragment),
-		},
+		descriptor:     descriptor,
 		fragmentLength: fragmentLength,
-		iterator:       writers,
-		pool:           pool,
+		iterator:       iterator,
 		mutex:          sync.Mutex{},
 	}, nil
 }
@@ -170,26 +165,20 @@ func (c *FragmentWriter) Write(p []byte) (int, error) {
 	defer c.mutex.Unlock()
 	written := 0
 	for i := 0; len(p) > 0; i++ {
-		writerID := c.iterator.Next()
-		data := p[:c.fragmentLength-c.overflow]
-		n, err := c.pool.Get(writerID).Write(data)
-		if err != nil {
-			return written, err
-		}
+		n, err := c.iterator.Next().Write(p)
 		written += n
 		p = p[n:]
-
-		c.overflow = c.fragmentLength - n
-
-		c.chunkWriterDescriptor.Fragments[i] = Fragment{
-			Location: writerID,
-			Length:   n,
+		if errors.Is(err, io.ErrShortWrite) {
+			continue
+		}
+		if err != nil {
+			return written, err
 		}
 	}
 	return written, nil
 }
 
 // Descriptor returns the FileDescriptor of the file that was written.
-func (c *FragmentWriter) Descriptor() FileDescriptor {
-	return c.chunkWriterDescriptor
+func (c *FragmentWriter) Descriptor() *FileDescriptor {
+	return c.descriptor
 }
