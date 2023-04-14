@@ -13,23 +13,23 @@ type WriterIterator interface {
 	Next() io.Writer
 }
 
-// WriterGenarator is a wrapper around WriterPool
+// WriterFactory is a wrapper around WriterPool
 // that spawns writers able to fill the File Descriptor when writing.
-type WriterGenarator struct {
+type WriterFactory struct {
 	*WriterPool
 	recorder *DescriptorRecorder
 }
 
-// NewWriterGenerator creates a new WriterPoolDescriptorRecorder.
-func NewWriterGenerator(pool *WriterPool, recorder *DescriptorRecorder) *WriterGenarator {
-	return &WriterGenarator{
+// NewWriterFactory creates a new WriterPoolDescriptorRecorder.
+func NewWriterFactory(pool *WriterPool, recorder *DescriptorRecorder) *WriterFactory {
+	return &WriterFactory{
 		WriterPool: pool,
 		recorder:   recorder,
 	}
 }
 
 // Get returns a new writer that is able to fill the File Descriptor when writing.
-func (r *WriterGenarator) Get() io.Writer {
+func (r *WriterFactory) Get() io.Writer {
 	reference := uuid.New().String()
 	writer := r.WriterPool.Get(reference)
 	return r.NewWriterDescriptorRecorder(writer, reference)
@@ -45,7 +45,7 @@ type WriterDescriptorRecorder struct {
 }
 
 // NewWriterDescriptorRecorder creates a new WriterDescriptorRecorder.
-func (r *WriterGenarator) NewWriterDescriptorRecorder(writer io.Writer, reference string) *WriterDescriptorRecorder {
+func (r *WriterFactory) NewWriterDescriptorRecorder(writer io.Writer, reference string) *WriterDescriptorRecorder {
 	return &WriterDescriptorRecorder{
 		Writer:    writer,
 		recorder:  r.recorder,
@@ -67,9 +67,8 @@ func (r *WriterDescriptorRecorder) Write(p []byte) (n int, err error) {
 	return n, err
 }
 
-type IteratorConstructor func(writers []io.Writer) WriterIterator
-
-// RoundRobinChunkWriter is
+// RoundRobinChunkWriter is a writer that writes
+// to the underlying writers in a round robin fashion.
 type LimitWriterIteratorWrapper struct {
 	FragmentLength int
 	SubIterator    WriterIterator
@@ -128,11 +127,9 @@ func (sw *ShortWriteWriter) Write(p []byte) (n int, err error) {
 // FragmentWriter is a writer that writes
 // to a pool of writers in a round-robin fashion.
 type FragmentWriter struct {
-	overflow       int
-	fragmentLength int
-	descriptor     *FileDescriptor
-	iterator       WriterIterator
-	mutex          sync.Mutex
+	descriptor *FileDescriptor
+	iterator   WriterIterator
+	mutex      sync.Mutex
 }
 
 // NewRoundRobinChunkWriter creates a new RoundRobinChunkWriter.
@@ -140,7 +137,7 @@ func NewRoundRobinChunkWriter(pool *WriterPool, writersNumber, fragmentLength in
 	descriptor := &FileDescriptor{}
 	recorder := NewDescriptorRecorder(descriptor)
 
-	recPool := NewWriterGenerator(pool, recorder)
+	recPool := NewWriterFactory(pool, recorder)
 
 	writers := make([]io.Writer, writersNumber)
 	for i := 0; i < writersNumber; i++ {
@@ -152,10 +149,9 @@ func NewRoundRobinChunkWriter(pool *WriterPool, writersNumber, fragmentLength in
 	iterator := NewLimitWriterIteratorWrapper(ringIterator, fragmentLength)
 
 	return &FragmentWriter{
-		descriptor:     descriptor,
-		fragmentLength: fragmentLength,
-		iterator:       iterator,
-		mutex:          sync.Mutex{},
+		descriptor: descriptor,
+		iterator:   iterator,
+		mutex:      sync.Mutex{},
 	}, nil
 }
 

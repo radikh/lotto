@@ -20,11 +20,11 @@ type FileDescriptor struct {
 
 // DescriptorRecorder is used to record the fragments of a file.
 type DescriptorRecorder struct {
-	mu      sync.RWMutex
-	desc    *FileDescriptor
-	counter int
+	mu   sync.RWMutex
+	desc *FileDescriptor
 }
 
+// NewDescriptorRecorder creates a new DescriptorRecorder.
 func NewDescriptorRecorder(descriptor *FileDescriptor) *DescriptorRecorder {
 	return &DescriptorRecorder{
 		desc: descriptor,
@@ -37,8 +37,6 @@ func (cfd *DescriptorRecorder) Record(fragment Fragment) {
 	defer cfd.mu.Unlock()
 
 	cfd.desc.Fragments = append(cfd.desc.Fragments, fragment)
-
-	return
 }
 
 // FragmentReader is used to read fragments from a file described by a FileDescriptor.
@@ -65,8 +63,8 @@ func (c *FragmentReader) Read(buf []byte) (int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	written := 0
-	for len(buf) > 0 && c.position < len(c.descriptor.Fragments) {
-		fragment := c.descriptor.Fragments[c.position]
+
+	for _, fragment := range c.descriptor.Fragments[c.position:] {
 		max := fragment.Length - c.offset
 		window := cutToMaxLen(buf, max)
 
@@ -77,7 +75,7 @@ func (c *FragmentReader) Read(buf []byte) (int, error) {
 		}
 
 		c.offset += n
-		if c.offset == fragment.Length {
+		if c.offset >= fragment.Length {
 			c.position++
 			c.offset = 0
 		}
