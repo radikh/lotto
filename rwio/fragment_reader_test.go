@@ -10,7 +10,7 @@ import (
 func TestReader(t *testing.T) {
 	text := []byte("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed sed nisl nec nisl luctus lacinia")
 	catalog := NewInMemoryCatalog()
-	descriptor := func() FileDescriptor {
+	descriptor := func() *FileDescriptor {
 		pool := NewWriterPool(catalog)
 		writer, err := NewRoundRobinChunkWriter(pool, 2, 3)
 		assert.NoError(t, err)
