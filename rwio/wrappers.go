@@ -23,6 +23,7 @@ type ErrorReadWriteCloser struct {
 	Err error
 }
 
+// NewErrorReadWriteCloser returns a new ErrorReadWriteCloser that returns the provided error.
 func NewErrorReadWriteCloser(err error) *ErrorReadWriteCloser {
 	return &ErrorReadWriteCloser{Err: err}
 }

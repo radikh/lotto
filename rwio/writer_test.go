@@ -37,7 +37,7 @@ func TestWriteAndRead(t *testing.T) {
 
 	iterator := NewLimitWriterIteratorWrapper(ringIterator, fragmentLength)
 
-	writer := NewSequenceWriter(iterator)
+	writer := NewFragmentWriter(iterator)
 
 	t.Log(writer.iterator)
 
@@ -53,7 +53,10 @@ func TestWriteAndRead(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, len(text), n)
 
-	reader := NewFragmentReader(catalog, descriptor)
+	readerPool := NewReaderPool(catalog)
+	readerIterator := NewFragmentReaderIterator(readerPool, descriptor)
+
+	reader := NewFragmentReader(readerIterator)
 
 	result := make([]byte, len(tripletext))
 

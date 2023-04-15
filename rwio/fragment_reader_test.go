@@ -29,7 +29,7 @@ func TestReader(t *testing.T) {
 
 		iterator := NewLimitWriterIteratorWrapper(ringIterator, fragmentLength)
 
-		writer := NewSequenceWriter(iterator)
+		writer := NewFragmentWriter(iterator)
 
 		n, err := writer.Write([]byte(text))
 		assert.NoError(t, err)
@@ -39,7 +39,10 @@ func TestReader(t *testing.T) {
 	}
 
 	t.Run("read_with_eof", func(t *testing.T) {
-		reader := NewFragmentReader(catalog, descriptor())
+		readerPool := NewReaderPool(catalog)
+		readerIterator := NewFragmentReaderIterator(readerPool, descriptor())
+
+		reader := NewFragmentReader(readerIterator)
 		result := make([]byte, 80)
 
 		n, err := reader.Read(result)
@@ -49,7 +52,10 @@ func TestReader(t *testing.T) {
 	})
 
 	t.Run("result_bigger", func(t *testing.T) {
-		reader := NewFragmentReader(catalog, descriptor())
+		readerPool := NewReaderPool(catalog)
+		readerIterator := NewFragmentReaderIterator(readerPool, descriptor())
+
+		reader := NewFragmentReader(readerIterator)
 		result := make([]byte, 100)
 
 		n, err := reader.Read(result)
@@ -59,7 +65,10 @@ func TestReader(t *testing.T) {
 	})
 
 	t.Run("bigger_cap", func(t *testing.T) {
-		reader := NewFragmentReader(catalog, descriptor())
+		readerPool := NewReaderPool(catalog)
+		readerIterator := NewFragmentReaderIterator(readerPool, descriptor())
+
+		reader := NewFragmentReader(readerIterator)
 		result := make([]byte, 0, 100)
 
 		n, err := reader.Read(result)
@@ -69,7 +78,10 @@ func TestReader(t *testing.T) {
 	})
 
 	t.Run("several_reads", func(t *testing.T) {
-		reader := NewFragmentReader(catalog, descriptor())
+		readerPool := NewReaderPool(catalog)
+		readerIterator := NewFragmentReaderIterator(readerPool, descriptor())
+
+		reader := NewFragmentReader(readerIterator)
 		result := make([]byte, 10)
 
 		n, err := reader.Read(result)
@@ -84,7 +96,10 @@ func TestReader(t *testing.T) {
 	})
 
 	t.Run("read_empty", func(t *testing.T) {
-		reader := NewFragmentReader(catalog, descriptor())
+		readerPool := NewReaderPool(catalog)
+		readerIterator := NewFragmentReaderIterator(readerPool, descriptor())
+
+		reader := NewFragmentReader(readerIterator)
 		result := make([]byte, 0)
 
 		n, err := reader.Read(result)
@@ -93,7 +108,10 @@ func TestReader(t *testing.T) {
 	})
 
 	t.Run("read_already_empty", func(t *testing.T) {
-		reader := NewFragmentReader(catalog, descriptor())
+		readerPool := NewReaderPool(catalog)
+		readerIterator := NewFragmentReaderIterator(readerPool, descriptor())
+
+		reader := NewFragmentReader(readerIterator)
 		result := make([]byte, 100)
 
 		n, err := reader.Read(result)
@@ -108,7 +126,10 @@ func TestReader(t *testing.T) {
 	})
 
 	t.Run("read_after_eof", func(t *testing.T) {
-		reader := NewFragmentReader(catalog, descriptor())
+		readerPool := NewReaderPool(catalog)
+		readerIterator := NewFragmentReaderIterator(readerPool, descriptor())
+
+		reader := NewFragmentReader(readerIterator)
 		result := make([]byte, 80)
 
 		n, err := reader.Read(result)
@@ -127,12 +148,16 @@ func TestReader(t *testing.T) {
 		assert.Equal(t, 0, n)
 	})
 
-	t.Run("readed_error", func(t *testing.T) {
+	t.Run("reader_error", func(t *testing.T) {
 		descriptor := descriptor()
 		descriptor.Fragments[0] = Fragment{
 			Location: "Unexisting id",
+			Length:   10,
 		}
-		reader := NewFragmentReader(catalog, descriptor)
+		readerPool := NewReaderPool(catalog)
+		readerIterator := NewFragmentReaderIterator(readerPool, descriptor)
+
+		reader := NewFragmentReader(readerIterator)
 		result := make([]byte, 100)
 
 		n, err := reader.Read(result)
