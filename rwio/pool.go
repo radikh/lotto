@@ -5,54 +5,6 @@ import (
 	"sync"
 )
 
-// WriterPool is a pool of io.WriteCloser instances.
-type WriterPool struct {
-	Pool[io.WriteCloser]
-}
-
-// NewWriterPool creates a new WriterPool.
-func NewWriterPool(catalog Catalog) *WriterPool {
-	return &WriterPool{
-		Pool: *NewPool(catalog.Create),
-	}
-}
-
-// Get returns an io.WriteCloser from the pool.
-// If connot construct a new instance,
-// it returns an ErrorReadWriteCloser with the constructor error.
-func (p *WriterPool) Get(reference string) io.Writer {
-	writer, err := p.Pool.Get(reference)
-	if err != nil {
-		return NewErrorReadWriteCloser(err)
-	}
-
-	return writer
-}
-
-// ReaderPool is a pool of io.ReadCloser instances.
-type ReaderPool struct {
-	Pool[io.ReadCloser]
-}
-
-// NewReaderPool creates a new ReaderPool.
-func NewReaderPool(catalog Catalog) *ReaderPool {
-	return &ReaderPool{
-		Pool: *NewPool(catalog.Open),
-	}
-}
-
-// Get returns an io.ReadCloser from the pool.
-// If connot construct a new instance,
-// it returns an ErrorReadWriteCloser with the constructor error.
-func (p *ReaderPool) Get(reference string) io.Reader {
-	reader, err := p.Pool.Get(reference)
-	if err != nil {
-		return NewErrorReadWriteCloser(err)
-	}
-
-	return reader
-}
-
 // Pool is a generic pool of io.Closer instances.
 type Pool[item io.Closer] struct {
 	items       map[string]item

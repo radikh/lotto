@@ -8,6 +8,30 @@ import (
 	"github.com/google/uuid"
 )
 
+// WriterPool is a pool of io.WriteCloser instances.
+type WriterPool struct {
+	Pool[io.WriteCloser]
+}
+
+// NewWriterPool creates a new WriterPool.
+func NewWriterPool(catalog Catalog) *WriterPool {
+	return &WriterPool{
+		Pool: *NewPool(catalog.Create),
+	}
+}
+
+// Get returns an io.WriteCloser from the pool.
+// If connot construct a new instance,
+// it returns an ErrorReadWriteCloser with the constructor error.
+func (p *WriterPool) Get(reference string) io.Writer {
+	writer, err := p.Pool.Get(reference)
+	if err != nil {
+		return NewErrorReadWriteCloser(err)
+	}
+
+	return writer
+}
+
 // WriterIterator is an interface that allows to iterate over a collection of io.Writer.
 type WriterIterator interface {
 	Next() io.Writer
@@ -126,21 +150,21 @@ func (sw *ShortWriteWriter) Write(p []byte) (n int, err error) {
 
 // RoundRobinChunkWriter is a writer that writes
 // writes to the underlying writers until the data is exhausted.
-type SequenceWriter struct {
+type FragmentWriter struct {
 	iterator WriterIterator
 	mutex    sync.Mutex
 }
 
-// NewSequenceWriter creates a new SequenceWriter.
-func NewSequenceWriter(iterator WriterIterator) *SequenceWriter {
-	return &SequenceWriter{
+// NewFragmentWriter creates a new FragmentWriter.
+func NewFragmentWriter(iterator WriterIterator) *FragmentWriter {
+	return &FragmentWriter{
 		iterator: iterator,
 		mutex:    sync.Mutex{},
 	}
 }
 
 // Write writes the given data to the pool of writers in a round-robin fashion.
-func (c *SequenceWriter) Write(p []byte) (int, error) {
+func (c *FragmentWriter) Write(p []byte) (int, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	written := 0
