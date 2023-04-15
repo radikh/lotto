@@ -3,6 +3,7 @@ package rwio
 import (
 	"bytes"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -15,7 +16,7 @@ func (m *MemoryWriterFactory) New(id int) io.Writer {
 }
 
 func TestWriteAndRead(t *testing.T) {
-	text := "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed sed nisl nec nisl luctus lacini"
+	text := strings.Repeat("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed sed nisl nec nisl luctus lacini", 1000)
 	tripletext := text + text + text
 
 	catalog := NewInMemoryCatalog()
@@ -26,8 +27,8 @@ func TestWriteAndRead(t *testing.T) {
 
 	recPool := NewWriterFactory(pool, recorder)
 
-	fragmentLength := 2
-	writersNumber := 3
+	fragmentLength := 300
+	writersNumber := 60
 	writers := make([]io.Writer, 0)
 	for i := 0; i < writersNumber; i++ {
 		writers = append(writers, recPool.Get())
@@ -64,7 +65,4 @@ func TestWriteAndRead(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, tripletext, string(result))
 	assert.Equal(t, len(tripletext), n)
-
-	t.Logf("%s", result)
-	t.Logf("%+v", descriptor)
 }
