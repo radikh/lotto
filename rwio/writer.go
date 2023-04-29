@@ -8,6 +8,11 @@ import (
 	"github.com/google/uuid"
 )
 
+var (
+	// ErrNoSpaceToWrite is returned when there is no place to write.
+	ErrNoSpaceToWrite = errors.New("no place to write")
+)
+
 // WriterPool is a pool of io.WriteCloser instances.
 type WriterPool struct {
 	Pool[io.WriteCloser]
@@ -109,6 +114,9 @@ func NewLimitWriterIteratorWrapper(subIterator WriterIterator, fragmentLength in
 // Next returns the next writer in the pool
 // limiting the writes to the fragment length.
 func (i *LimitWriterIteratorWrapper) Next() io.Writer {
+	if i.FragmentLength < 1 {
+		return NewErrorReadWriteCloser(ErrNoSpaceToWrite)
+	}
 	next := i.SubIterator.Next()
 	return NewShortWriteWriter(next, i.FragmentLength)
 }
@@ -119,6 +127,7 @@ func (i *LimitWriterIteratorWrapper) Next() io.Writer {
 type ShortWriteWriter struct {
 	w     io.Writer
 	limit int
+	mu    sync.Mutex
 }
 
 // NewShortWriteWriter creates a new ShortWriteWriter.
@@ -126,6 +135,7 @@ func NewShortWriteWriter(w io.Writer, limit int) *ShortWriteWriter {
 	return &ShortWriteWriter{
 		w:     w,
 		limit: limit,
+		mu:    sync.Mutex{},
 	}
 }
 
@@ -133,6 +143,8 @@ func NewShortWriteWriter(w io.Writer, limit int) *ShortWriteWriter {
 // If the data is larger than the limit, it will be
 // truncated and io.ErrShortWrite will be returned.
 func (sw *ShortWriteWriter) Write(p []byte) (n int, err error) {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
 	if sw.limit <= 0 {
 		return 0, io.ErrShortWrite
 	}
@@ -180,4 +192,22 @@ func (c *FragmentWriter) Write(p []byte) (int, error) {
 		}
 	}
 	return written, nil
+}
+
+// NewChunkWriter creates a new ChunkWriter.
+// that writes to the underlying writers in a round robin fashion.
+func NewChunkWriter(fragmentLength int, writersNumber int, catalog Catalog, descriptor *FileDescriptor) *FragmentWriter {
+	pool := NewWriterPool(catalog)
+	recorder := NewDescriptorRecorder(descriptor)
+	recPool := NewWriterFactory(pool, recorder)
+
+	writers := make([]io.Writer, 0)
+	for i := 0; i < writersNumber; i++ {
+		writers = append(writers, recPool.Get())
+	}
+
+	ringIterator := NewRing(writers...)
+	iterator := NewLimitWriterIteratorWrapper(ringIterator, fragmentLength)
+
+	return NewFragmentWriter(iterator)
 }
