@@ -37,6 +37,7 @@ type FragmentReader struct {
 	mu      sync.RWMutex
 }
 
+// FragmentReaderIterator is used to iterate over the fragments of a FileDescriptor.
 type FragmentReaderIterator struct {
 	readers    *ReaderPool
 	descriptor *FileDescriptor
@@ -44,6 +45,7 @@ type FragmentReaderIterator struct {
 	index      int
 }
 
+// NewFragmentReaderIterator creates a new FragmentReaderIterator.
 func NewFragmentReaderIterator(readers *ReaderPool, descriptor *FileDescriptor) *FragmentReaderIterator {
 	return &FragmentReaderIterator{
 		readers:    readers,
@@ -51,6 +53,8 @@ func NewFragmentReaderIterator(readers *ReaderPool, descriptor *FileDescriptor) 
 	}
 }
 
+// Next returns the next fragment reader.
+// If there are no more fragments, it returns nil.
 func (fri *FragmentReaderIterator) Next() io.Reader {
 	fri.mu.Lock()
 	defer fri.mu.Unlock()
