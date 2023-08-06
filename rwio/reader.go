@@ -3,18 +3,19 @@ package rwio
 import (
 	"errors"
 	"io"
+	"io/fs"
 	"sync"
 )
 
 // ReaderPool is a pool of io.ReadCloser instances.
 type ReaderPool struct {
-	Pool[io.ReadCloser]
+	Pool[fs.File]
 }
 
 // NewReaderPool creates a new ReaderPool.
-func NewReaderPool(catalog Catalog) *ReaderPool {
+func NewReaderPool(filesystem fs.FS) *ReaderPool {
 	return &ReaderPool{
-		Pool: *NewPool(catalog.Open),
+		Pool: *NewPool(filesystem.Open),
 	}
 }
 

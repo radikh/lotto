@@ -1,0 +1,13 @@
+FTP interface
+HTTP interface
+S3 interface
+GRPC interface
+
+Filesystem mapping and config
+
+Storages:
+S3
+FTP
+
+
+Make reader to work like writer

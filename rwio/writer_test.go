@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"io/fs"
 	"strings"
 	"testing"
 
@@ -97,6 +98,8 @@ func TestWriteAndRead(t *testing.T) {
 
 			catalog := NewInMemoryCatalog()
 			descriptor := &FileDescriptor{}
+
+			f := fs.FS(catalog)
 
 			fragmentLength := tc.fragmentLength
 			writersNumber := tc.writersNumber
